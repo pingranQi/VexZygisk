@@ -3,6 +3,7 @@
 #include <stddef.h>
 #include <string.h>
 #include <errno.h>
+#include <limits.h>
 #include <time.h>
 
 #include <inttypes.h>
@@ -275,8 +276,9 @@ uintptr_t remote_call(int pid, struct user_regs_struct *regs, uintptr_t func_add
     LOGE("remote call has invalid AArch64 stack pointer %p", (void *)regs->REG_SP);
     return 0;
   }
-  if (args_size > 8 && args_size - 8 > SIZE_MAX / sizeof(long)) {
-    LOGE("remote call stack argument size overflows");
+  if (args_size > 8 &&
+      args_size - 8 > (size_t)LONG_MAX / sizeof(long)) {
+    LOGE("remote call stack argument size exceeds AArch64 stack range");
     return 0;
   }
 
