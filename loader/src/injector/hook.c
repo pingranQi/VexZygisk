@@ -537,7 +537,18 @@ void hook_jni_methods(JNIEnv *env, const char *clz, JNINativeMethod *methods, in
     }
 
     void *art_method = amethod_from_reflected_method(env, method);
+    if (art_method == NULL) {
+      (*env)->DeleteLocalRef(env, method);
+      nm->fnPtr = NULL;
+      continue;
+    }
+
     void *orig = amethod_get_data((uintptr_t)art_method);
+    if (orig == NULL) {
+      (*env)->DeleteLocalRef(env, method);
+      nm->fnPtr = NULL;
+      continue;
+    }
     nm->fnPtr = orig;
 
     /* Each candidate has a signature-specific trampoline. Registering every
@@ -564,6 +575,10 @@ void hook_jni_methods(JNIEnv *env, const char *clz, JNINativeMethod *methods, in
             here, and nothing later revisits it. */
   if ((*env)->RegisterNatives(env, clazz, hooks, (jint)hooks_count) != JNI_OK) {
     (*env)->ExceptionClear(env);
+
+    /* The caller reads fnPtr to decide which trampoline was installed. Do not
+       expose an original pointer as an installed hook when registration failed. */
+    for (int i = 0; i < numMethods; i++) methods[i].fnPtr = NULL;
 
     LOGE("failed to register the JNI hooks for %s", clz);
   }
