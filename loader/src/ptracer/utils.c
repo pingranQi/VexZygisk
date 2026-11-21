@@ -289,10 +289,20 @@ uintptr_t remote_call(int pid, struct user_regs_struct *regs, uintptr_t func_add
     return 0;
   }
 
-  ptrace(PTRACE_CONT, pid, 0, 0);
+  if (ptrace(PTRACE_CONT, pid, 0, 0) == -1) {
+    PLOGE("PTRACE_CONT for remote call");
+    return 0;
+  }
 
-  int status;
+  int status = 0;
   wait_for_trace(pid, &status, __WALL);
+  if (!WIFSTOPPED(status)) {
+    char status_str[64];
+    parse_status(status, status_str, sizeof(status_str));
+    LOGE("remote call did not stop as expected: %s", status_str);
+    return 0;
+  }
+
   if (!get_regs(pid, regs)) {
     LOGE("failed to get regs after call");
 
