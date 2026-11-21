@@ -49,8 +49,17 @@ static inline bool mount_entry_split(char *line, unsigned int *id,
 
   *separator = '\0';
 
-  if (sscanf(line, "%u %*u %*u:%*u %4095s %4095s", id, root, target) != 3) return false;
-  if (sscanf(separator + 3, "%127s %4095s", type, source) != 2) return false;
+  int root_end = 0, target_end = 0, type_end = 0, source_end = 0;
+  if (sscanf(line, "%u %*u %*u:%*u %4095s%n %4095s%n",
+             id, root, &root_end, target, &target_end) != 3) return false;
+  if ((line[root_end] != ' ' && line[root_end] != '\t') ||
+      (line[target_end] != ' ' && line[target_end] != '\t')) return false;
+
+  if (sscanf(separator + 3, "%127s%n %4095s%n",
+             type, &type_end, source, &source_end) != 2) return false;
+  if ((separator[3 + type_end] != ' ' && separator[3 + type_end] != '\t') ||
+      (separator[3 + source_end] != ' ' && separator[3 + source_end] != '\t' &&
+       separator[3 + source_end] != '\0')) return false;
 
   return true;
 }
