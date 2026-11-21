@@ -166,11 +166,29 @@ static bool elf_validate_file_tables(const struct csoloader_elf *img) {
   if (!img || !img->header || img->size < sizeof(ElfW(Ehdr))) return false;
 
   const ElfW(Ehdr) *ehdr = img->header;
-  if (ehdr->e_ehsize != sizeof(ElfW(Ehdr)) ||
+#ifdef __LP64__
+  if (ehdr->e_ident[EI_CLASS] != ELFCLASS64) return false;
+#else
+  if (ehdr->e_ident[EI_CLASS] != ELFCLASS32) return false;
+#endif
+  if (ehdr->e_ident[EI_DATA] != ELFDATA2LSB ||
+      ehdr->e_ident[EI_VERSION] != EV_CURRENT ||
+      ehdr->e_version != EV_CURRENT ||
+      (ehdr->e_type != ET_DYN && ehdr->e_type != ET_EXEC) ||
+      ehdr->e_ehsize != sizeof(ElfW(Ehdr)) ||
       ehdr->e_phentsize != sizeof(ElfW(Phdr)) ||
       ehdr->e_phnum == 0 ||
       !elf_file_range_valid(img->size, ehdr->e_phoff,
                             (uint64_t)ehdr->e_phnum * sizeof(ElfW(Phdr)))) return false;
+#if defined(__aarch64__)
+  if (ehdr->e_machine != EM_AARCH64) return false;
+#elif defined(__arm__)
+  if (ehdr->e_machine != EM_ARM) return false;
+#elif defined(__x86_64__)
+  if (ehdr->e_machine != EM_X86_64) return false;
+#elif defined(__i386__)
+  if (ehdr->e_machine != EM_386) return false;
+#endif
 
   ElfW(Phdr) *phdr = (ElfW(Phdr) *)((uintptr_t)img->header + ehdr->e_phoff);
   bool has_load = false;
@@ -183,7 +201,18 @@ static bool elf_validate_file_tables(const struct csoloader_elf *img) {
     if (ph->p_type == PT_LOAD && ph->p_memsz != 0) has_load = true;
     if (ph->p_type == PT_DYNAMIC) {
       if (ph->p_memsz < sizeof(ElfW(Dyn)) ||
-          ph->p_memsz % sizeof(ElfW(Dyn)) != 0) return false;
+          ph->p_memsz % sizeof(ElfW(Dyn)) != 0 ||
+          ph->p_memsz != ph->p_filesz) return false;
+      bool contained = false;
+      for (size_t j = 0; j < ehdr->e_phnum; j++) {
+        const ElfW(Phdr) *load = &phdr[j];
+        if (load->p_type != PT_LOAD || ph->p_vaddr < load->p_vaddr) continue;
+        if (ph->p_vaddr + ph->p_memsz <= load->p_vaddr + load->p_memsz) {
+          contained = true;
+          break;
+        }
+      }
+      if (!contained) return false;
       has_dynamic = true;
     }
   }
