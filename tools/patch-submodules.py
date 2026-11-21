@@ -13,6 +13,18 @@ def replace_once(path: Path, old: str, new: str, label: str) -> None:
     if new in text:
         return
     if old not in text:
+        # Allow the validator overlay to evolve without making an existing
+        # developer checkout fail on the next incremental build.
+        marker = "/* Validate all file-backed ELF tables before turning their offsets into"
+        if label == "CSOLoader ELF table validator" and marker in text:
+            start = text.index(marker)
+            end_marker = "static int dl_cb"
+            end = text.index(end_marker, start)
+            new_start = new.index(marker)
+            new_end = new.rindex(end_marker)
+            text = text[:start] + new[new_start:new_end] + text[end:]
+            path.write_text(text)
+            return
         raise SystemExit(f"Cannot apply {label}: source anchor changed in {path}")
     path.write_text(text.replace(old, new, 1))
 
