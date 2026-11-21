@@ -88,11 +88,11 @@ CSOLOADER_INPUTS = $(shell find $(CSOLOADER_DIR) -type f 2>/dev/null | sort)
 # Apply pinned third-party ELF hardening overlays once before either helper
 # library is built. This shared prerequisite prevents parallel sub-makes from
 # racing while editing their separate source trees.
-SUBMODULE_PATCHES_DONE = $(BUILD_DIR)/obj/$(BUILD_TYPE)/loader/submodule-patches.done
+SUBMODULE_PATCHES_DONE = $(ROOT_DIR)/build/submodule-patches.done
 
 $(SUBMODULE_PATCHES_DONE): $(PLTI_INPUTS) $(CSOLOADER_INPUTS) ../tools/patch-submodules.py
 	@mkdir -p $(dir $@)
-	python3 ../tools/patch-submodules.py $(PLTI_DIR) $(CSOLOADER_DIR)
+	flock $(ROOT_DIR)/build/submodule-patches.lock python3 ../tools/patch-submodules.py $(PLTI_DIR) $(CSOLOADER_DIR)
 	@touch $@
 
 
