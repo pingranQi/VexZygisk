@@ -413,7 +413,9 @@ bool hide_module_maps(void) {
   if (hide_memfd != -1) {
     close(hide_memfd);
     hide_memfd = -1;
-    hide_memfd_sealed = true;
+    /* A partial pass may retry the mappings that failed with a fresh memfd.
+       Seal creation only after the pass is complete. */
+    if (failed_maps == 0) hide_memfd_sealed = true;
   }
 
   if (maps > 0) LOGD("Hid %zu module map(s), %zu KiB", maps, bytes / 1024);
