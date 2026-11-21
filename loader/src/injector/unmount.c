@@ -118,10 +118,20 @@ static bool mount_list_parse(const char *path, struct mount_list *out) {
     }
 
     struct mount_entry info = { 0 };
+    errno = 0;
     if (mount_info_parse(line, &info)) {
       out->items[out->len] = info;
       out->len++;
+    } else if (errno == ENOMEM) {
+      LOGE("Out of memory parsing mountinfo");
+      ok = false;
+      break;
     }
+  }
+
+  if (ferror(file)) {
+    PLOGE("Failed reading %s", path);
+    ok = false;
   }
 
   free(line);
