@@ -158,6 +158,22 @@ def patch_csoloader(root: Path) -> None:
     path = root / "src/elf_util.c"
     replace_once(
         path,
+        """  img->size = st.st_size;
+
+  if (img->size <= sizeof(ElfW(Ehdr))) {""",
+        """  if (st.st_size < 0 || (uintmax_t)st.st_size > SIZE_MAX) {
+    LOGE("Invalid ELF file size for %s", img->elf);
+    close(fd);
+    csoloader_elf_destroy(img);
+    return NULL;
+  }
+  img->size = (size_t)st.st_size;
+
+  if (img->size <= sizeof(ElfW(Ehdr))) {""",
+        "CSOLoader file size bound",
+    )
+    replace_once(
+        path,
         """static ElfW(Word) *offsetOf_Word(ElfW(Ehdr) *head, ElfW(Off) off) {
   return (ElfW(Word) *)(((uintptr_t)head) + off);
 }
