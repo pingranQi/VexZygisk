@@ -85,13 +85,24 @@ clean:
 PLTI_INPUTS = $(shell find $(PLTI_DIR) -type f 2>/dev/null | sort)
 CSOLOADER_INPUTS = $(shell find $(CSOLOADER_DIR) -type f 2>/dev/null | sort)
 
-$(PLTI_LIB): $(PLTI_INPUTS)
+# Apply pinned third-party ELF hardening overlays once before either helper
+# library is built. This shared prerequisite prevents parallel sub-makes from
+# racing while editing their separate source trees.
+SUBMODULE_PATCHES_DONE = $(ROOT_DIR)/build/submodule-patches.done
+
+$(SUBMODULE_PATCHES_DONE): $(PLTI_INPUTS) $(CSOLOADER_INPUTS) ../tools/patch-submodules.py
+	@mkdir -p $(dir $@)
+	flock $(ROOT_DIR)/build/submodule-patches.lock python3 ../tools/patch-submodules.py $(PLTI_DIR) $(CSOLOADER_DIR)
+	@touch $@
+
+
+$(PLTI_LIB): $(PLTI_INPUTS) $(SUBMODULE_PATCHES_DONE)
 	@mkdir -p $(dir $@)
 	$(MAKE) -C $(PLTI_DIR) BUILD_TYPE=$(BUILD_TYPE) ARCH=$(ARCH) \
 		NDK_PATH=$(NDK_PATH) API_LEVEL=$(API_LEVEL)              \
 		out=$(BUILD_DIR)/obj/$(BUILD_TYPE)/plti/$(ARCH)
 
-$(CSOLOADER_LIB): $(CSOLOADER_INPUTS)
+$(CSOLOADER_LIB): $(CSOLOADER_INPUTS) $(SUBMODULE_PATCHES_DONE)
 	@mkdir -p $(dir $@)
 	$(MAKE) -C $(CSOLOADER_DIR) BUILD_TYPE=$(BUILD_TYPE) ARCH=$(ARCH) \
 		NDK_PATH=$(NDK_PATH) API_LEVEL=$(API_LEVEL)                   \

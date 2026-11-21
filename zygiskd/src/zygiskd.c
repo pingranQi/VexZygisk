@@ -581,6 +581,8 @@ static void reload_modules(struct Context *restrict context) {
          the handler signature stable and lets dispatch stay a plain table. */
 struct Client {
   int fd;
+  pid_t peer_pid;
+  uid_t peer_uid;
   struct Context *context;
   char *restrict *argv;
   bool *first_process;
@@ -849,6 +851,24 @@ static void handle_update_mount_namespace(struct Client *client) {
   ret = read_uint8_t(client->fd, &mns_state);
   ASSURE_SIZE_READ("UpdateMountNamespace", "mns_state", ret, sizeof(mns_state), return);
 
+  /* The requested namespace must belong to the process that opened
+     this connection. Without this check any client able to reach the socket
+     could make the privileged daemon enter an unrelated process namespace
+     and cache a descriptor for it. SO_PEERCRED is captured at accept time;
+     compare against that kernel-supplied identity, not a PID in the payload. */
+  if (target_process == 0 || target_process != (uint32_t)client->peer_pid) {
+    LOGE("Rejecting UpdateMountNamespace for pid %u from peer pid %d",
+         target_process, client->peer_pid);
+
+    ret = write_uint32_t(client->fd, 0);
+    ASSURE_SIZE_WRITE("UpdateMountNamespace", "our_pid", ret, sizeof(uint32_t), return);
+
+    ret = write_uint32_t(client->fd, 0);
+    ASSURE_SIZE_WRITE("UpdateMountNamespace", "ns_fd", ret, sizeof(uint32_t), return);
+
+    return;
+  }
+
   uint32_t our_pid = (uint32_t)getpid();
   ret = write_uint32_t(client->fd, our_pid);
   ASSURE_SIZE_WRITE("UpdateMountNamespace", "our_pid", ret, sizeof(our_pid), return);
@@ -939,6 +959,18 @@ static const struct ActionHandler *find_action_handler(enum DaemonSocketAction a
 }
 
 static void serve_accepted(int client_fd, struct Context *restrict context, char *restrict argv[], bool *first_process) {
+  /* Capture the peer identity from the kernel before parsing any request.
+     Request payloads are untrusted and must not be allowed to choose the PID
+     whose mount namespace the privileged daemon later opens. */
+  struct ucred peer = { 0 };
+  socklen_t peer_len = sizeof(peer);
+  if (getsockopt(client_fd, SOL_SOCKET, SO_PEERCRED, &peer, &peer_len) == -1 ||
+      peer_len != sizeof(peer) || peer.pid <= 0) {
+    LOGE("Failed to obtain valid daemon client credentials: %s", strerror(errno));
+    close(client_fd);
+    return;
+  }
+
   /* INFO: Bound a single exchange so a stuck client cannot stall the zygote
             forks waiting behind it. A control session clears this for itself:
             it is read while it is quiet, which is most of its life. */
@@ -973,8 +1005,41 @@ static void serve_accepted(int client_fd, struct Context *restrict context, char
     return;
   }
 
+  /* The loader connects during Zygote's pre-specialize window, while
+     the child still has uid 0. The target app UID in GetProcessFlags is
+     intentionally independent of SO_PEERCRED.uid: it is policy input, not
+     proof of the caller's identity. Only a root peer may request lifecycle
+     changes, mutate the module table, query another UID's root/denylist flags,
+     or obtain a privileged mount-namespace fd. Read-only metadata and the
+     companion/module-directory APIs remain available to appdomain as required
+     by Zygisk. SELinux still constrains which domains can reach this socket. */
+  switch ((enum DaemonSocketAction)action8) {
+    case ZygoteInjected:
+    case GetProcessFlags:
+    case ZygoteRestart:
+    case UpdateMountNamespace:
+    case RemoveModule:
+      if (peer.uid != 0) {
+        LOGE("Rejecting privileged daemon action %s from uid %u pid %d",
+             handler->name, (unsigned int)peer.uid, peer.pid);
+        close(client_fd);
+        return;
+      }
+      break;
+    case GetInfo:
+    case ReadModules:
+    case RequestCompanionSocket:
+    case GetModuleDir:
+      break;
+    default:
+      close(client_fd);
+      return;
+  }
+
   struct Client client = {
     .fd            = client_fd,
+    .peer_pid      = peer.pid,
+    .peer_uid      = peer.uid,
     .context       = context,
     .argv          = argv,
     .first_process = first_process,

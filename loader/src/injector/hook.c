@@ -493,9 +493,8 @@ void hook_jni_methods(JNIEnv *env, const char *clz, JNINativeMethod *methods, in
     return;
   }
 
-  JNINativeMethod hooks[32];
+  JNINativeMethod hooks[1];
   size_t hooks_count = 0;
-  bool overflow_logged = false;
 
   for (int i = 0; i < numMethods; i++) {
     bool is_static = false;
@@ -538,25 +537,31 @@ void hook_jni_methods(JNIEnv *env, const char *clz, JNINativeMethod *methods, in
     }
 
     void *art_method = amethod_from_reflected_method(env, method);
-    if (hooks_count < (sizeof(hooks) / sizeof(hooks[0]))) {
-      hooks[hooks_count++] = *nm;
-    } else if (!overflow_logged) {
-      /* INFO: The registration table is fixed at 32 entries; a module that
-                hooks more than that loses the rest silently, while the loop
-                still rewrote its fnPtr as though every hook had gone in.
-                Said once, at the boundary. */
-      overflow_logged = true;
-
-      LOGE("more than %zu native methods for %s: the ones past the limit are not hooked",
-           sizeof(hooks) / sizeof(hooks[0]), clz);
+    if (art_method == NULL) {
+      (*env)->DeleteLocalRef(env, method);
+      nm->fnPtr = NULL;
+      continue;
     }
 
     void *orig = amethod_get_data((uintptr_t)art_method);
+    if (orig == NULL) {
+      (*env)->DeleteLocalRef(env, method);
+      nm->fnPtr = NULL;
+      continue;
+    }
     nm->fnPtr = orig;
+
+    /* Each candidate has a signature-specific trampoline. Registering every
+       OEM signature against the first trampoline makes later overloads call
+       the original function with the wrong ABI. Hook only the first native
+       signature present on this runtime; do_hook_zygote stores its original
+       pointer in the matching trampoline slot. */
+    hooks[hooks_count++] = *nm;
 
     LOGV("replaced %s %s orig %p: %s", clz, nm->name, orig, nm->signature);
 
     (*env)->DeleteLocalRef(env, method);
+    break;
   }
 
   if (hooks_count == 0) {
@@ -570,6 +575,10 @@ void hook_jni_methods(JNIEnv *env, const char *clz, JNINativeMethod *methods, in
             here, and nothing later revisits it. */
   if ((*env)->RegisterNatives(env, clazz, hooks, (jint)hooks_count) != JNI_OK) {
     (*env)->ExceptionClear(env);
+
+    /* The caller reads fnPtr to decide which trampoline was installed. Do not
+       expose an original pointer as an installed hook when registration failed. */
+    for (int i = 0; i < numMethods; i++) methods[i].fnPtr = NULL;
 
     LOGE("failed to register the JNI hooks for %s", clz);
   }

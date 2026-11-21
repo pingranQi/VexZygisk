@@ -3,6 +3,7 @@
 
 #include <errno.h>
 #include <stdint.h>
+#include <stdbool.h>
 #include <string.h>
 
 #include <unistd.h>
@@ -116,29 +117,41 @@ static inline int read_fd(int fd) {
 
   ssize_t ret;
   do {
-    ret = recvmsg(fd, &msg, MSG_WAITALL);
+    ret = recvmsg(fd, &msg, MSG_WAITALL | MSG_CMSG_CLOEXEC);
   } while (ret == -1 && errno == EINTR);
 
   if (ret == -1) return -1;
 
-  /* Truncated control data: the kernel closes a descriptor it could not
-     deliver, so walking a half-written buffer is never the right answer. */
-  if (msg.msg_flags & MSG_CTRUNC) return -1;
-
   struct cmsghdr *cmsg;
-  int sendfd = -1;
+  int received_fd = -1;
+  size_t received_count = 0;
+  bool truncated = (msg.msg_flags & (MSG_CTRUNC | MSG_TRUNC)) != 0;
 
+  /* Descriptors that fit in a truncated SCM_RIGHTS message are already
+     installed in this process. Walk every delivered control message and close
+     all of them unless the frame contains exactly one complete descriptor. */
   for (cmsg = CMSG_FIRSTHDR(&msg); cmsg != NULL; cmsg = CMSG_NXTHDR(&msg, cmsg)) {
-    if (cmsg->cmsg_level != SOL_SOCKET || cmsg->cmsg_type != SCM_RIGHTS || cmsg->cmsg_len < CMSG_LEN(sizeof(int))) continue;
+    if (cmsg->cmsg_level != SOL_SOCKET || cmsg->cmsg_type != SCM_RIGHTS ||
+        cmsg->cmsg_len < CMSG_LEN(sizeof(int))) continue;
 
-    memcpy(&sendfd, CMSG_DATA(cmsg), sizeof(int));
-
-    break;
+    size_t count = (cmsg->cmsg_len - CMSG_LEN(0)) / sizeof(int);
+    int *fds = (int *)CMSG_DATA(cmsg);
+    for (size_t i = 0; i < count; i++) {
+      received_count++;
+      if (!truncated && received_count == 1 && count == 1) {
+        received_fd = fds[i];
+      } else {
+        close(fds[i]);
+      }
+    }
   }
 
-  if (sendfd == -1) return -1;
+  if (truncated || ret != (ssize_t)sizeof(buf) || received_count != 1) {
+    if (received_fd != -1) close(received_fd);
+    return -1;
+  }
 
-  return sendfd;
+  return received_fd;
 }
 
 static inline ssize_t write_uint8_t(int fd, uint8_t val) {

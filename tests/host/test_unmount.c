@@ -320,6 +320,23 @@ static void check_id_ordering(void) {
          prefix that matches one byte too many would revert a sibling directory
          such as /data/adb/modules_extra, and one that matches one too few would
          leave the module mounts of a real installation behind. */
+static void check_rejects_truncated_mount_fields(void) {
+  printf("-- reject truncated mountinfo fields\n");
+
+  char line[8192];
+  size_t offset = (size_t)snprintf(line, sizeof(line), "99 1 0:1 /");
+  memset(line + offset, 'x', MOUNT_FIELD_MAX);
+  offset += MOUNT_FIELD_MAX;
+  offset += (size_t)snprintf(line + offset, sizeof(line) - offset,
+                             " /target rw - ext4 /dev/block/test rw");
+
+  unsigned int id = 0;
+  char root[MOUNT_FIELD_MAX], target[MOUNT_FIELD_MAX];
+  char type[MOUNT_TYPE_MAX], source[MOUNT_FIELD_MAX];
+  CHECK(!mount_entry_split(line, &id, root, target, type, source),
+        "overlong root field was silently truncated and accepted");
+}
+
 static void check_path_boundaries(void) {
   printf("-- trace path boundaries\n");
 
@@ -348,6 +365,7 @@ int main(void) {
   check_abort_refusals();
   check_id_ordering();
   check_path_boundaries();
+  check_rejects_truncated_mount_fields();
   check_revert_stays_detached();
 
   if (g_failures == 0) {

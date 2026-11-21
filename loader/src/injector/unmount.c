@@ -118,10 +118,20 @@ static bool mount_list_parse(const char *path, struct mount_list *out) {
     }
 
     struct mount_entry info = { 0 };
+    errno = 0;
     if (mount_info_parse(line, &info)) {
       out->items[out->len] = info;
       out->len++;
+    } else if (errno == ENOMEM) {
+      LOGE("Out of memory parsing mountinfo");
+      ok = false;
+      break;
     }
+  }
+
+  if (ferror(file)) {
+    PLOGE("Failed reading %s", path);
+    ok = false;
   }
 
   free(line);
@@ -217,10 +227,14 @@ bool revert_root_traces_here(void) {
            mount_list_free(&all) call that follows it. */
   const char *loop_source = find_module_loop_source(&all);
 
+  bool selection_complete = true;
   for (size_t i = 0; i < all.len; i++) {
     if (!carries_root_trace(&all.items[i], loop_source)) continue;
 
-    if (!mount_list_reserve(&traces, traces.len + 1)) break;
+    if (!mount_list_reserve(&traces, traces.len + 1)) {
+      selection_complete = false;
+      break;
+    }
 
     traces.items[traces.len] = all.items[i];
 
@@ -239,6 +253,13 @@ bool revert_root_traces_here(void) {
   }
 
   mount_list_free(&all);
+
+  /* Never detach a partial selection: the caller must use the clean namespace
+     fallback when the complete set could not be collected. */
+  if (!selection_complete) {
+    mount_list_free(&traces);
+    return false;
+  }
 
   if (abort_zygote_unmount(&traces)) {
     /* INFO: Refused, not failed. The caller falls back to the clean

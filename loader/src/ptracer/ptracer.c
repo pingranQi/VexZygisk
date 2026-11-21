@@ -142,6 +142,21 @@ static bool find_injected_range(int pid, const char *lib_path,
   return true;
 }
 
+static void rollback_remote_dlopen(int pid, struct user_regs_struct *regs,
+                                    struct maps_info *map, struct maps_info *local_map,
+                                    uintptr_t handle, void *return_addr) {
+  void *dlclose_addr = find_func_addr(local_map, map, "libdl.so", "dlclose");
+  if (!dlclose_addr) {
+    LOGE("could not find dlclose to roll back remote dlopen handle %p", (void *)handle);
+    return;
+  }
+
+  long args[1] = { (long)handle };
+  remote_call(pid, regs, (uintptr_t)dlclose_addr, (uintptr_t)return_addr, args, 1);
+  if ((uintptr_t)regs->REG_IP != (uintptr_t)return_addr)
+    LOGE("remote dlclose did not return while rolling back handle %p", (void *)handle);
+}
+
 static bool dlopen_inject(int pid, struct user_regs_struct *regs, struct maps_info *map,
                           struct maps_info *local_map, const char *lib_path, void *return_addr) {
   void *dlopen_addr = find_func_addr(local_map, map, "libdl.so", "dlopen");
@@ -182,7 +197,7 @@ static bool dlopen_inject(int pid, struct user_regs_struct *regs, struct maps_in
   void *dlsym_addr = find_func_addr(local_map, map, "libdl.so", "dlsym");
   if (!dlsym_addr) {
     LOGE("could not find dlsym in the target process");
-
+    rollback_remote_dlopen(pid, regs, map, local_map, handle, return_addr);
     return false;
   }
 
@@ -193,7 +208,7 @@ static bool dlopen_inject(int pid, struct user_regs_struct *regs, struct maps_in
 
   if (write_proc(pid, remote_entry_name, entry_sym, sizeof(entry_sym)) != (ssize_t)sizeof(entry_sym)) {
     LOGE("failed to write the entry symbol name into the target");
-
+    rollback_remote_dlopen(pid, regs, map, local_map, handle, return_addr);
     return false;
   }
 
@@ -207,7 +222,7 @@ static bool dlopen_inject(int pid, struct user_regs_struct *regs, struct maps_in
   uintptr_t entry = remote_call(pid, regs, (uintptr_t)dlsym_addr, (uintptr_t)return_addr, dlsym_args, 2);
   if (!entry) {
     LOGE("dlsym(\"entry\") failed in the target");
-
+    rollback_remote_dlopen(pid, regs, map, local_map, handle, return_addr);
     return false;
   }
 
@@ -216,7 +231,10 @@ static bool dlopen_inject(int pid, struct user_regs_struct *regs, struct maps_in
   uintptr_t base = 0;
   size_t size = 0;
 
-  if (!find_injected_range(pid, lib_path, &base, &size)) return false;
+  if (!find_injected_range(pid, lib_path, &base, &size)) {
+    rollback_remote_dlopen(pid, regs, map, local_map, handle, return_addr);
+    return false;
+  }
 
   LOGI("injected library base %p size %zu", (void *)base, size);
 
@@ -304,7 +322,8 @@ bool inject_on_main(int pid, const char *lib_path, uintptr_t libc_init_target, u
   struct maps_info *map = parse_maps(pid_str);
   if (!map) {
     LOGE("Failed to parse remote maps after GOT break");
-
+    backup.REG_IP = (long)libc_init_target;
+    if (!set_regs(pid, &backup)) PLOGE("Failed to restore registers after remote maps failure");
     return false;
   }
 
@@ -313,7 +332,8 @@ bool inject_on_main(int pid, const char *lib_path, uintptr_t libc_init_target, u
     LOGE("Failed to parse local maps");
 
     free_maps(map);
-
+    backup.REG_IP = (long)libc_init_target;
+    if (!set_regs(pid, &backup)) PLOGE("Failed to restore registers after local maps failure");
     return false;
   }
 
@@ -324,7 +344,8 @@ bool inject_on_main(int pid, const char *lib_path, uintptr_t libc_init_target, u
 
     free_maps(local_map);
     free_maps(map);
-
+    backup.REG_IP = (long)libc_init_target;
+    if (!set_regs(pid, &backup)) PLOGE("Failed to restore registers after libc return lookup failure");
     return false;
   }
 
