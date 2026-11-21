@@ -538,25 +538,20 @@ void hook_jni_methods(JNIEnv *env, const char *clz, JNINativeMethod *methods, in
     }
 
     void *art_method = amethod_from_reflected_method(env, method);
-    if (hooks_count < (sizeof(hooks) / sizeof(hooks[0]))) {
-      hooks[hooks_count++] = *nm;
-    } else if (!overflow_logged) {
-      /* INFO: The registration table is fixed at 32 entries; a module that
-                hooks more than that loses the rest silently, while the loop
-                still rewrote its fnPtr as though every hook had gone in.
-                Said once, at the boundary. */
-      overflow_logged = true;
-
-      LOGE("more than %zu native methods for %s: the ones past the limit are not hooked",
-           sizeof(hooks) / sizeof(hooks[0]), clz);
-    }
-
     void *orig = amethod_get_data((uintptr_t)art_method);
     nm->fnPtr = orig;
+
+    /* Each candidate has a signature-specific trampoline. Registering every
+       OEM signature against the first trampoline makes later overloads call
+       the original function with the wrong ABI. Hook only the first native
+       signature present on this runtime; do_hook_zygote stores its original
+       pointer in the matching trampoline slot. */
+    hooks[hooks_count++] = *nm;
 
     LOGV("replaced %s %s orig %p: %s", clz, nm->name, orig, nm->signature);
 
     (*env)->DeleteLocalRef(env, method);
+    break;
   }
 
   if (hooks_count == 0) {
