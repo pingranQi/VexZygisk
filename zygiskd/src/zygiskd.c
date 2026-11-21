@@ -579,7 +579,10 @@ static void reload_modules(struct Context *restrict context) {
 
 /* INFO: Per-connection state handed to every action handler. One struct keeps
          the handler signature stable and lets dispatch stay a plain table. */
-struct Client {\r\n  int fd;\r\n  pid_t peer_pid;\r\n  struct Context *context;
+struct Client {
+  int fd;
+  pid_t peer_pid;
+  struct Context *context;
   char *restrict *argv;
   bool *first_process;
   /* INFO: Set by the one handler that answers without giving the connection
