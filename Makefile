@@ -85,7 +85,7 @@ LOADER_DONE = $(OBJ_DIR)/loader/.done
 ZYGISKD_DONE = $(OBJ_DIR)/zygiskd/.done
 MODULE_DONE = $(BUILD_DIR)/module-$(BUILD_TYPE).done
 
-LOADER_INPUTS = common.mk loader/Makefile \
+LOADER_INPUTS = common.mk loader/Makefile tools/patch-submodules.py \
         $(shell find loader/src -type f | sort)
 
 # INFO: zygiskd compiles against the headers in loader/src/include (see the
