@@ -188,6 +188,23 @@ void *find_func_addr(struct maps_info *local_info, struct maps_info *remote_info
   uintptr_t remote_base = (uintptr_t)remote_entry->start;
   uintptr_t offset = 0;
 
+  /* A symbol offset is only transferable when both mappings refer to the
+     same ELF image. Matching the SONAME alone is insufficient: Android can
+     expose libraries with the same basename from different APEX/linker
+     namespaces, and their symbol layouts need not match. Prefer an identical
+     path; otherwise require the kernel's device+inode identity. */
+  bool same_path = local_entry->path && remote_entry->path &&
+                   strcmp(local_entry->path, remote_entry->path) == 0;
+  bool same_file = local_entry->inode != 0 && remote_entry->inode != 0 &&
+                   local_entry->inode == remote_entry->inode &&
+                   local_entry->dev == remote_entry->dev;
+  if (!same_path && !same_file) {
+    LOGE("local and target %s mappings refer to different ELF files (%s vs %s)",
+         module, local_entry->path ? local_entry->path : "(no path)",
+         remote_entry->path ? remote_entry->path : "(no path)");
+    return NULL;
+  }
+
   if (local_entry->path != NULL) {
     ElfImg *mod = ElfImg_create(local_entry->path, (void *)local_base);
 
@@ -223,6 +240,11 @@ void *find_func_addr(struct maps_info *local_info, struct maps_info *remote_info
     return NULL;
   }
 
+  if (offset > UINTPTR_MAX - remote_base) {
+    LOGE("remote address overflow resolving %s!%s", module, func);
+    return NULL;
+  }
+
   uintptr_t addr = remote_base + offset;
 
   LOGD("found remote %s!%s at %p (offset %#zx, local base %p, remote base %p)", module, func,
@@ -240,6 +262,24 @@ void align_stack(struct user_regs_struct *regs, long preserve) {
 }
 
 uintptr_t remote_call(int pid, struct user_regs_struct *regs, uintptr_t func_addr, uintptr_t return_addr, long *args, size_t args_size) {
+  if (regs == NULL || func_addr == 0 || return_addr == 0 ||
+      (args_size != 0 && args == NULL)) {
+    LOGE("remote call has invalid registers, function, return address, or arguments");
+    return 0;
+  }
+
+  /* AAPCS64 requires SP to be 16-byte aligned at every public interface.
+     Keep the check explicit here: an invalid saved SP must not be converted
+     into a plausible-looking address by align_stack(). */
+  if ((regs->REG_SP & 0xf) != 0 || regs->REG_SP < 0x1000) {
+    LOGE("remote call has invalid AArch64 stack pointer %p", (void *)regs->REG_SP);
+    return 0;
+  }
+  if (args_size > 8 && args_size - 8 > SIZE_MAX / sizeof(long)) {
+    LOGE("remote call stack argument size overflows");
+    return 0;
+  }
+
   align_stack(regs, 0);
 
   /* INFO: BTYPE so jumping into the callee is accepted by the CPU. The
@@ -266,8 +306,12 @@ uintptr_t remote_call(int pid, struct user_regs_struct *regs, uintptr_t func_add
   }
 
   if (args_size > 8) {
-    long remain = (args_size - 8) * sizeof(long);
-    align_stack(regs, remain);
+    size_t remain = (args_size - 8) * sizeof(long);
+    if ((uintptr_t)regs->REG_SP < remain + 16) {
+      LOGE("remote call stack argument area underflows the target stack");
+      return 0;
+    }
+    align_stack(regs, (long)remain);
 
     /* INFO: Checked, like every other write into the target: a short or
               failed copy would have the callee read its stack arguments from
