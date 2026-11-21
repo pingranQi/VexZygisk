@@ -185,7 +185,7 @@ static inline void rz_module_call_pre_app_specialize(struct rezygisk_module *m, 
   }
 
   if (m->abi.api_version < 1 || m->abi.api_version > REZYGISK_API_VERSION) {
-    LOGE("Module [%s] has unsupported Zygisk API version %u",
+    LOGE("Module [%s] has unsupported Zygisk API version %ld",
          module_name(m), m->abi.api_version);
     return;
   }
@@ -233,6 +233,12 @@ static inline void rz_module_call_pre_app_specialize(struct rezygisk_module *m, 
 }
 
 static inline void rz_module_call_post_app_specialize(struct rezygisk_module *m, const struct app_specialize_args_v5 *args) {
+  if (m->abi.api_version < 1 || m->abi.api_version > REZYGISK_API_VERSION) {
+    LOGE("Module [%s] has unsupported Zygisk API version %ld",
+         module_name(m), m->abi.api_version);
+    return;
+  }
+
   if (!m->abi.post_app_specialize) {
     /* NOTE: See the header block above on Magisk's missing callback check. */
     LOGW("Module [%s] doesn't have post_app_specialize. Skipping it.", module_name(m));
