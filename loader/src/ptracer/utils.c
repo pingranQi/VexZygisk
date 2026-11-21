@@ -194,12 +194,13 @@ void *find_func_addr(struct maps_info *local_info, struct maps_info *remote_info
      expose libraries with the same basename from different APEX/linker
      namespaces, and their symbol layouts need not match. Prefer an identical
      path; otherwise require the kernel's device+inode identity. */
-  bool same_path = local_entry->path && remote_entry->path &&
-                   strcmp(local_entry->path, remote_entry->path) == 0;
-  bool same_file = local_entry->inode != 0 && remote_entry->inode != 0 &&
+  bool have_file_ids = local_entry->inode != 0 && remote_entry->inode != 0;
+  bool same_file = have_file_ids &&
                    local_entry->inode == remote_entry->inode &&
                    local_entry->dev == remote_entry->dev;
-  if (!same_path && !same_file) {
+  bool same_path = !have_file_ids && local_entry->path && remote_entry->path &&
+                   strcmp(local_entry->path, remote_entry->path) == 0;
+  if (!same_file && !same_path) {
     LOGE("local and target %s mappings refer to different ELF files (%s vs %s)",
          module, local_entry->path ? local_entry->path : "(no path)",
          remote_entry->path ? remote_entry->path : "(no path)");
