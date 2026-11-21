@@ -493,9 +493,8 @@ void hook_jni_methods(JNIEnv *env, const char *clz, JNINativeMethod *methods, in
     return;
   }
 
-  JNINativeMethod hooks[32];
+  JNINativeMethod hooks[1];
   size_t hooks_count = 0;
-  bool overflow_logged = false;
 
   for (int i = 0; i < numMethods; i++) {
     bool is_static = false;
