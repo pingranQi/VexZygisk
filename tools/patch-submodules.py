@@ -112,12 +112,24 @@ static int64_t sleb128_decode(struct sleb128_decoder *decoder) {
     )
     replace_once(
         path,
+        """  /* Each relocation consumes at least one input byte. This also bounds the
+     allocation requested by an untrusted or corrupted APS2 stream. */
+  if (decoder.failed || num_relocs == 0 || num_relocs > elf->rel_android_size_) return false;""",
+        """  /* Bound allocations even when APS2 groups compress many relocations
+     into one encoded group. One million entries is far above normal system
+     libraries while keeping a corrupted count from exhausting process memory. */
+  if (decoder.failed || num_relocs == 0 || num_relocs > (UINT64_C(1) << 20)) return false;""",
+        "PLTI relocation count migration",
+    )
+    replace_once(
+        path,
         """  uint64_t num_relocs = sleb128_decode(&decoder);
   if (num_relocs <= 0) return false;""",
         """  uint64_t num_relocs = (uint64_t)sleb128_decode(&decoder);
-  /* Each relocation consumes at least one input byte. This also bounds the
-     allocation requested by an untrusted or corrupted APS2 stream. */
-  if (decoder.failed || num_relocs == 0 || num_relocs > elf->rel_android_size_) return false;""",
+  /* Bound allocations even when APS2 groups compress many relocations
+     into one encoded group. One million entries is far above normal system
+     libraries while keeping a corrupted count from exhausting process memory. */
+  if (decoder.failed || num_relocs == 0 || num_relocs > (UINT64_C(1) << 20)) return false;""",
         "PLTI relocation count bound",
     )
     replace_once(
