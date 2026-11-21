@@ -184,6 +184,12 @@ static inline void rz_module_call_pre_app_specialize(struct rezygisk_module *m, 
     return;
   }
 
+  if (m->abi.api_version < 1 || m->abi.api_version > REZYGISK_API_VERSION) {
+    LOGE("Module [%s] has unsupported Zygisk API version %u",
+         module_name(m), m->abi.api_version);
+    return;
+  }
+
   switch (m->abi.api_version) {
     case 1:
     case 2: {
