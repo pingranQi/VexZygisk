@@ -116,7 +116,7 @@ static inline int read_fd(int fd) {
 
   ssize_t ret;
   do {
-    ret = recvmsg(fd, &msg, MSG_WAITALL);
+    ret = recvmsg(fd, &msg, MSG_WAITALL | MSG_CMSG_CLOEXEC);
   } while (ret == -1 && errno == EINTR);
 
   if (ret == -1) return -1;
