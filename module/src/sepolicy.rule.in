@@ -38,5 +38,5 @@ allow zygote tmpfs file *
 # INFO: The same mapping grant for a process outside the zygote domain. Kept to
 #       what loading a library performs rather than a wildcard, since this one
 #       is not limited to zygote.
-allow domain tmpfs file {open getattr map read execute}
+allow zygote tmpfs file {open getattr map read execute}
 allow zygote appdomain_tmpfs file *
