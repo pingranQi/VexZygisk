@@ -375,6 +375,7 @@ bool hide_module_maps(void) {
             that was still whole, and acting on them now cannot race the
             reader that produced them. */
   size_t maps = 0;
+  size_t failed_maps = 0;
 #ifndef NDEBUG
   size_t bytes = 0;
 #endif
@@ -387,6 +388,8 @@ bool hide_module_maps(void) {
 #ifndef NDEBUG
       bytes += target->size;
 #endif
+    } else {
+      failed_maps++;
     }
   }
 
@@ -419,6 +422,12 @@ bool hide_module_maps(void) {
             to know is that this process has had its pass - and a process with
             nothing to hide is exactly the one that must not pay for reading the
             whole table a second time to learn the same thing. */
+  if (failed_maps != 0) {
+    LOGW("Failed to hide %zu of %zu module map(s); a later pass may retry",
+         failed_maps, maps + failed_maps);
+    return false;
+  }
+
   module_maps_were_hidden = true;
 
   return true;
