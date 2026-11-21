@@ -1005,7 +1005,9 @@ static void serve_accepted(int client_fd, struct Context *restrict context, char
   }
 
   struct Client client = {
-    .fd            = client_fd,\r\n    .peer_pid      = peer.pid,\r\n    .context       = context,
+    .fd            = client_fd,
+    .peer_pid      = peer.pid,
+    .context       = context,
     .argv          = argv,
     .first_process = first_process,
     .keep_open     = false
