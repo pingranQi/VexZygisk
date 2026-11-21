@@ -110,17 +110,16 @@ static int64_t sleb128_decode(struct sleb128_decoder *decoder) {
 }""",
         "PLTI bounded SLEB128 decoder",
     )
-    replace_once(
-        path,
-        """  /* Each relocation consumes at least one input byte. This also bounds the
+    previous_count_guard = """  /* Each relocation consumes at least one input byte. This also bounds the
      allocation requested by an untrusted or corrupted APS2 stream. */
-  if (decoder.failed || num_relocs == 0 || num_relocs > elf->rel_android_size_) return false;""",
-        """  /* Bound allocations even when APS2 groups compress many relocations
+  if (decoder.failed || num_relocs == 0 || num_relocs > elf->rel_android_size_) return false;"""
+    current_count_guard = """  /* Bound allocations even when APS2 groups compress many relocations
      into one encoded group. One million entries is far above normal system
      libraries while keeping a corrupted count from exhausting process memory. */
-  if (decoder.failed || num_relocs == 0 || num_relocs > (UINT64_C(1) << 20)) return false;""",
-        "PLTI relocation count migration",
-    )
+  if (decoder.failed || num_relocs == 0 || num_relocs > (UINT64_C(1) << 20)) return false;"""
+    text = path.read_text()
+    if previous_count_guard in text:
+        path.write_text(text.replace(previous_count_guard, current_count_guard, 1))
     replace_once(
         path,
         """  uint64_t num_relocs = sleb128_decode(&decoder);
