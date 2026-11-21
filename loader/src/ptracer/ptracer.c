@@ -304,7 +304,8 @@ bool inject_on_main(int pid, const char *lib_path, uintptr_t libc_init_target, u
   struct maps_info *map = parse_maps(pid_str);
   if (!map) {
     LOGE("Failed to parse remote maps after GOT break");
-
+    backup.REG_IP = (long)libc_init_target;
+    if (!set_regs(pid, &backup)) PLOGE("Failed to restore registers after remote maps failure");
     return false;
   }
 
@@ -313,7 +314,8 @@ bool inject_on_main(int pid, const char *lib_path, uintptr_t libc_init_target, u
     LOGE("Failed to parse local maps");
 
     free_maps(map);
-
+    backup.REG_IP = (long)libc_init_target;
+    if (!set_regs(pid, &backup)) PLOGE("Failed to restore registers after local maps failure");
     return false;
   }
 
@@ -324,7 +326,8 @@ bool inject_on_main(int pid, const char *lib_path, uintptr_t libc_init_target, u
 
     free_maps(local_map);
     free_maps(map);
-
+    backup.REG_IP = (long)libc_init_target;
+    if (!set_regs(pid, &backup)) PLOGE("Failed to restore registers after libc return lookup failure");
     return false;
   }
 
