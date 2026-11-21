@@ -87,6 +87,11 @@ if [ "$BOOTMODE" ]; then
   [ -f "$tracer" ] && "$tracer" ctl exit >/dev/null 2>&1
 
   killall -9 zygisk-ptrace64 >/dev/null 2>&1 || true
+
+  # The monitor's EXIT command stops its event loop but does not own the
+  # daemon's lifetime. Stop the old daemon before replacing its executable
+  # and socket path, avoiding an orphaned process across an in-place update.
+  killall -9 zygiskd64 >/dev/null 2>&1 || true
 fi
 
 ui_print "- Extracting module files"
