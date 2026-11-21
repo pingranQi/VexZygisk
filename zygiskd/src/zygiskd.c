@@ -582,6 +582,7 @@ static void reload_modules(struct Context *restrict context) {
 struct Client {
   int fd;
   pid_t peer_pid;
+  uid_t peer_uid;
   struct Context *context;
   char *restrict *argv;
   bool *first_process;
@@ -1004,9 +1005,41 @@ static void serve_accepted(int client_fd, struct Context *restrict context, char
     return;
   }
 
+  /* The loader connects during Zygote's pre-specialize window, while
+     the child still has uid 0. The target app UID in GetProcessFlags is
+     intentionally independent of SO_PEERCRED.uid: it is policy input, not
+     proof of the caller's identity. Only a root peer may request lifecycle
+     changes, mutate the module table, query another UID's root/denylist flags,
+     or obtain a privileged mount-namespace fd. Read-only metadata and the
+     companion/module-directory APIs remain available to appdomain as required
+     by Zygisk. SELinux still constrains which domains can reach this socket. */
+  switch ((enum DaemonSocketAction)action8) {
+    case ZygoteInjected:
+    case GetProcessFlags:
+    case ZygoteRestart:
+    case UpdateMountNamespace:
+    case RemoveModule:
+      if (peer.uid != 0) {
+        LOGE("Rejecting privileged daemon action %s from uid %u pid %d",
+             handler->name, (unsigned int)peer.uid, peer.pid);
+        close(client_fd);
+        return;
+      }
+      break;
+    case GetInfo:
+    case ReadModules:
+    case RequestCompanionSocket:
+    case GetModuleDir:
+      break;
+    default:
+      close(client_fd);
+      return;
+  }
+
   struct Client client = {
     .fd            = client_fd,
     .peer_pid      = peer.pid,
+    .peer_uid      = peer.uid,
     .context       = context,
     .argv          = argv,
     .first_process = first_process,
